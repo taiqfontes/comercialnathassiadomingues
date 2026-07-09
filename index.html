@@ -164,6 +164,7 @@ body{font-family:'Jost',sans-serif;background:#f2ebe4;color:var(--text);min-heig
   <div class="sidebar-group-title">Gestão</div>
   <ul class="sidebar-nav">
     <li><a onclick="showPage('e1-lista',this)"><span class="dot"></span>Lista de Leads</a></li>
+    <li><a onclick="showPage('e1-diario',this)"><span class="dot"></span>Totalizador por Dia</a></li>
   </ul>
 
   <div class="sidebar-divider"></div>
@@ -294,6 +295,47 @@ body{font-family:'Jost',sans-serif;background:#f2ebe4;color:var(--text);min-heig
       <tbody id="e1l-tbody"></tbody>
     </table>
     <div class="pagination"><span id="e1l-info"></span><button id="e1l-prev" onclick="pagLista('e1',-1)">‹ Ant.</button><button id="e1l-next" onclick="pagLista('e1',1)">Próx. ›</button></div>
+  </div>
+</div>
+
+<!-- ═══ E1: DIÁRIO ═══ -->
+<div id="page-e1-diario" class="page">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-title">Etapa 1 — <span>Totalizador por Dia</span></div>
+      <span class="topbar-badge">Etapa Comercial 1</span>
+    </div>
+    <div class="filter-pills">
+      <button class="pill active" onclick="setMes('e1dia','todos',this)">Todos</button>
+      <button class="pill" onclick="setMes('e1dia','Mai/2026',this)">Mai/26</button>
+      <button class="pill" onclick="setMes('e1dia','Jun/2026',this)">Jun/26</button>
+      <button class="pill" onclick="setMes('e1dia','Jul/2026',this)">Jul/26</button>
+    </div>
+  </div>
+  <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+    <div class="kpi-card c-copper"><div class="kpi-label">Período</div><div class="kpi-value" id="e1dia-periodo" style="font-size:18px">—</div><div class="kpi-sub" id="e1dia-dias">—</div></div>
+    <div class="kpi-card c-amber"><div class="kpi-label">Média por Dia</div><div class="kpi-value" id="e1dia-media">—</div><div class="kpi-sub">leads/dia</div></div>
+    <div class="kpi-card c-green"><div class="kpi-label">Dia com mais leads</div><div class="kpi-value" id="e1dia-pico" style="font-size:18px">—</div><div class="kpi-sub" id="e1dia-pico-sub">—</div></div>
+  </div>
+  <div class="card" style="margin-bottom:1rem">
+    <div class="card-title">Volume de Leads por Dia</div>
+    <div style="height:240px"><canvas id="e1dia-chart-bar"></canvas></div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th>Dia da Semana</th>
+          <th>Leads</th>
+          <th>Convertidos (E4)</th>
+          <th>Potenciais</th>
+          <th>Perdidos</th>
+          <th>Volume</th>
+        </tr>
+      </thead>
+      <tbody id="e1dia-tbody"></tbody>
+    </table>
   </div>
 </div>
 
@@ -485,11 +527,100 @@ function refreshPage(id) {
   if (id==='e1-dashboard') buildE1Dashboard();
   else if (id==='e1-funil') buildE1Funil();
   else if (id==='e1-canais') buildE1Canais();
+  else if (id==='e1-diario') buildE1Diario();
   else if (id==='e1-lista') renderLista('e1');
   else if (id==='e2-dashboard') buildE2Dashboard();
   else if (id==='e2-funil') buildE2Funil();
   else if (id==='e2-canais') buildE2Canais();
   else if (id==='e2-lista') renderLista('e2');
+}
+
+// ── E1 DIÁRIO ─────────────────────────────────────────
+const DIAS_PT = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+const DIAS_FULL = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
+
+function buildE1Diario() {
+  const mes = mesState['e1dia'] || 'todos';
+  const leads = getLeads('e1', mes);
+
+  // Agrupar por data
+  const mapaData = {};
+  leads.forEach(l => {
+    if (!l.data) return;
+    if (!mapaData[l.data]) mapaData[l.data] = [];
+    mapaData[l.data].push(l);
+  });
+
+  // Ordenar datas
+  const datas = Object.keys(mapaData).sort((a,b) => {
+    const [da,ma,ya] = a.split('/'); const [db,mb,yb] = b.split('/');
+    return new Date(`${ya}-${ma}-${da}`) - new Date(`${yb}-${mb}-${db}`);
+  });
+
+  // KPIs
+  const totalDias = datas.length;
+  const totalLeads = leads.filter(l => l.data).length;
+  const media = totalDias > 0 ? (totalLeads / totalDias).toFixed(1) : 0;
+  let picoDia = '', picoQtd = 0;
+  datas.forEach(d => { if (mapaData[d].length > picoQtd) { picoQtd = mapaData[d].length; picoDia = d; } });
+
+  // Formatar período
+  const periodo = datas.length > 0 ? `${datas[0]} — ${datas[datas.length-1]}` : '—';
+  document.getElementById('e1dia-periodo').textContent = periodo;
+  document.getElementById('e1dia-dias').textContent = `${totalDias} dias com registros`;
+  document.getElementById('e1dia-media').textContent = media;
+  document.getElementById('e1dia-pico').textContent = picoDia;
+  document.getElementById('e1dia-pico-sub').textContent = `${picoQtd} leads neste dia`;
+
+  // Gráfico de barras
+  killChart('e1dia-bar');
+  const barLabels = datas.map(d => { const [dia,mes] = d.split('/'); return `${dia}/${mes}`; });
+  const barData = datas.map(d => mapaData[d].length);
+  const barColors = datas.map(d => mapaData[d].length === picoQtd ? '#2d7a4f' : '#9B5B3E');
+  charts['e1dia-bar'] = new Chart(document.getElementById('e1dia-chart-bar'), {
+    type: 'bar',
+    data: { labels: barLabels, datasets: [{ data: barData, backgroundColor: barColors, borderRadius: 4 }] },
+    options: {
+      plugins: {
+        legend: { display: false },
+        datalabels: { color: '#fff', font: { size: 10, weight: '600' }, anchor: 'end', align: 'start',
+          formatter: v => v > 0 ? v : '' }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 9 }, color: '#5C3020', maxRotation: 45 } },
+        y: { display: false, grid: { display: false } }
+      },
+      responsive: true, maintainAspectRatio: false
+    }
+  });
+
+  // Tabela
+  const maxQtd = picoQtd || 1;
+  const tbody = document.getElementById('e1dia-tbody');
+  tbody.innerHTML = datas.map(d => {
+    const grupo = mapaData[d];
+    const qtd = grupo.length;
+    const conv = grupo.filter(l => l.etapa1 === '4. Pago, Consulta Agendada').length;
+    const pot = grupo.filter(l => l.etapa1 === '3. Potencial / Mostrou Interesse').length;
+    const perd = grupo.filter(l => l.etapa1.startsWith('X.')).length;
+    const [dia, mes, ano] = d.split('/');
+    const diaSemana = new Date(`${ano}-${mes}-${dia}`).getDay();
+    const isWeekend = diaSemana === 0 || diaSemana === 6;
+    const pct = Math.round((qtd / maxQtd) * 100);
+    return `<tr style="${isWeekend ? 'background:#fdf8f5' : ''}">
+      <td style="font-weight:500">${d}</td>
+      <td style="color:${isWeekend ? 'var(--copper)' : 'var(--muted)'};font-size:11px">${DIAS_FULL[diaSemana]}</td>
+      <td><strong style="font-size:15px;font-family:'Cormorant Garamond',serif">${qtd}</strong></td>
+      <td>${conv > 0 ? `<span class="badge b-pago">${conv}</span>` : '<span style="color:#ccc">—</span>'}</td>
+      <td>${pot > 0 ? `<span class="badge b-pot">${pot}</span>` : '<span style="color:#ccc">—</span>'}</td>
+      <td>${perd > 0 ? `<span class="badge b-perd">${perd}</span>` : '<span style="color:#ccc">—</span>'}</td>
+      <td style="width:140px">
+        <div style="background:var(--copper-bg2);border-radius:4px;height:16px;overflow:hidden">
+          <div style="width:${pct}%;background:${qtd===picoQtd?'#2d7a4f':'#9B5B3E'};height:100%;border-radius:4px;transition:width .4s"></div>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
 }
 
 // ── E1 DASHBOARD ──────────────────────────────────────
